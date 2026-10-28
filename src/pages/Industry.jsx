@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { bySlug, companyKey, byCompanyKey, coverage } from '../data.js'
 
 const TAG = { direct: 'tag--direct', indirect: 'tag--indirect', supplier: 'tag--supplier', conglomerate: 'tag--conglomerate' }
 const PRI = { high: 'dot--high', med: 'dot--med', medium: 'dot--med', low: 'dot--low' }
 
+/* ---------------- metric detail popup ---------------- */
 function MetricModal({ metric, onClose }) {
   if (!metric) return null
   return (
@@ -23,6 +24,88 @@ function MetricModal({ metric, onClose }) {
   )
 }
 
+/* ---------------- system diagram (mermaid) ---------------- */
+function Diagram({ source }) {
+  const ref = useRef(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!source) return
+    let cancelled = false
+    const load = new Function('u', 'return import(u)') // keep the CDN URL out of the bundle
+    load('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs')
+      .then(mod => {
+        const mermaid = mod.default || mod
+        mermaid.initialize({ startOnLoad: false, theme: 'base', fontFamily: 'IBM Plex Sans, sans-serif', securityLevel: 'loose' })
+        const id = 'dgm-' + Math.random().toString(36).slice(2)
+        return mermaid.render(id, source).then(({ svg }) => {
+          if (!cancelled && ref.current) ref.current.innerHTML = svg
+        })
+      })
+      .catch(() => { if (!cancelled) setFailed(true) })
+    return () => { cancelled = true }
+  }, [source])
+
+  return (
+    <div className="diagram-shell">
+      {failed
+        ? <pre className="diagram-fallback">{source}</pre>
+        : <div className="mermaid-wrap" ref={ref}><span className="diagram-loading">rendering diagram…</span></div>}
+    </div>
+  )
+}
+
+/* ---------------- value-chain ladder ---------------- */
+function Ladder({ rungs }) {
+  return (
+    <div className="ladder">
+      {rungs.map((r, i) => (
+        <div className={'rung rung--' + r.tier} key={i}>
+          <div className="rung__label">{r.label}</div>
+          <div className="rung__body">{r.body}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ---------------- bottlenecks: risk (red) vs opportunity (green) ---------------- */
+function Bottlenecks({ pairs }) {
+  return (
+    <div className="bn-list">
+      {pairs.map((p, i) => (
+        <div className="bn" key={i}>
+          <div className="bn__risk">
+            <div className="bn__h"><span className="flagdot flagdot--red" /> Risk</div>
+            {p.risk.title && <div className="bn__title">{p.risk.title}</div>}
+            <p>{p.risk.text}</p>
+          </div>
+          <div className="bn__opp">
+            <div className="bn__h"><span className="flagdot flagdot--green" /> Opportunity</div>
+            {p.opp.title && <div className="bn__title">{p.opp.title}</div>}
+            <p>{p.opp.text}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ---------------- digest block group ---------------- */
+function Digest({ items }) {
+  return (
+    <div className="digest">
+      {items.map((d, i) => (
+        <div className="digest__item" key={i}>
+          <div className="digest__h">{d.h}</div>
+          <ul>{d.items.map((t, j) => <li key={j}>{t}</li>)}</ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ---------------- company map ---------------- */
 function CompanyMap({ nodes }) {
   const [sel, setSel] = useState(nodes[0]?.id ?? null)
   const node = nodes.find(n => n.id === sel) || nodes[0]
@@ -32,11 +115,7 @@ function CompanyMap({ nodes }) {
     <div className="map-layout">
       <div className="map-nodes">
         {nodes.map(n => (
-          <button
-            key={n.id}
-            className={'node-btn' + (n.id === node?.id ? ' is-active' : '')}
-            onClick={() => setSel(n.id)}
-          >
+          <button key={n.id} className={'node-btn' + (n.id === node?.id ? ' is-active' : '')} onClick={() => setSel(n.id)}>
             <div className="node-btn__name">{n.name}</div>
             <div className="node-btn__meta">
               <span className={'dot ' + (PRI[n.pri] || 'dot--none')} />
@@ -56,20 +135,18 @@ function CompanyMap({ nodes }) {
             <div className="map-panel__fn">{node.fn}</div>
             {node.importDep && <div className="map-panel__row"><span className="mini">Import dependence</span><span>{node.importDep}</span></div>}
             {node.conc && <div className="map-panel__row"><span className="mini">Concentration</span><span>{node.conc}</span></div>}
-
             {node.companies.length === 0 && (
               <div className="nocov">
                 <b>NO COVERAGE IN SELECTED UNIVERSE</b>
                 <span className="near">{node.near || node.gap || 'No listed player in NSE / BSE.'}</span>
               </div>
             )}
-
             {node.companies.map((c, i) => {
-              const key = byCompanyKey.get(c.n.toLowerCase()) ? companyKey(byCompanyKey.get(c.n.toLowerCase())) : null
+              const match = byCompanyKey.get(c.n.toLowerCase())
               return (
                 <div className="co" key={i}>
                   <div className="co__name">
-                    {key ? <Link to={'/c/' + encodeURIComponent(key)}>{c.n}</Link> : c.n}
+                    {match ? <Link to={'/c/' + encodeURIComponent(companyKey(match))}>{c.n}</Link> : c.n}
                   </div>
                   <div className="co__ticker">{c.t}</div>
                   <div className="co__tags"><span className={'tag ' + (TAG[c.e] || 'tag--direct')}>{c.e}</span></div>
@@ -85,6 +162,7 @@ function CompanyMap({ nodes }) {
   )
 }
 
+/* ---------------- company x node matrix ---------------- */
 function Matrix({ nodes }) {
   const rows = useMemo(() => {
     const m = new Map()
@@ -114,9 +192,7 @@ function Matrix({ nodes }) {
             {rows.map(r => (
               <tr key={r.ticker + r.name}>
                 <td><b>{r.name}</b><div className="co__ticker">{r.ticker}</div></td>
-                {nodes.map(n => (
-                  <td className="c" key={n.id}>{r.cells.has(n.id) ? letter(r.cells.get(n.id)) : '—'}</td>
-                ))}
+                {nodes.map(n => <td className="c" key={n.id}>{r.cells.has(n.id) ? letter(r.cells.get(n.id)) : '—'}</td>)}
               </tr>
             ))}
           </tbody>
@@ -126,6 +202,25 @@ function Matrix({ nodes }) {
   )
 }
 
+/* ---------------- generic table (regulatory calendar) ---------------- */
+function DataTable({ rows, head }) {
+  return (
+    <div className="table-wrap">
+      <div className="table-scroll">
+        <table className="data">
+          <thead><tr>{(head || ['Date / window', 'Item', 'What it does', 'Label']).map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>{r.map((c, j) => <td key={j}>{j === 3 ? <span className="chip chip--gold">{c}</span> : c}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- page ---------------- */
 export default function Industry() {
   const { slug } = useParams()
   const ind = bySlug.get(slug)
@@ -141,7 +236,7 @@ export default function Industry() {
       <header className="masthead">
         <h1>{ind.title}</h1>
         <div className="subtitle">
-          {ind.nodes.length} nodes · {cov.covered} with mapped companies · {cov.gaps} coverage gaps
+          {ind.nodes.length} nodes · {cov.covered} with mapped companies · {cov.gaps} coverage gaps · {ind.sections.length} sections
         </div>
       </header>
 
@@ -161,33 +256,23 @@ export default function Industry() {
         </div>
       )}
 
-      <div className="sec-head">
-        <span className="sec-num">01</span>
-        <span className="sec-title">Digest</span>
-        <span className="sec-note">{ind.digest.length} blocks</span>
-      </div>
-      <div className="digest">
-        {ind.digest.map((d, i) => (
-          <div className="digest__item" key={i}>
-            <div className="digest__h">{d.h}</div>
-            <ul>{d.items.map((t, j) => <li key={j}>{t}</li>)}</ul>
+      {ind.sections.map((sec, i) => (
+        <section key={i}>
+          <div className="sec-head">
+            <span className="sec-num">{String(i + 1).padStart(2, '0')}</span>
+            <span className="sec-title">{sec.title}</span>
+            {sec.note && <span className="sec-note">{sec.note}</span>}
           </div>
-        ))}
-      </div>
 
-      <div className="sec-head">
-        <span className="sec-num">02</span>
-        <span className="sec-title">BOM tree &amp; company map</span>
-        <span className="sec-note">click a node → its companies</span>
-      </div>
-      <CompanyMap nodes={ind.nodes} />
-
-      <div className="sec-head">
-        <span className="sec-num">03</span>
-        <span className="sec-title">Company × node matrix</span>
-        <span className="sec-note">D direct · I indirect · S supplier · C conglomerate</span>
-      </div>
-      <Matrix nodes={ind.nodes} />
+          {sec.source && <Diagram source={sec.source} />}
+          {sec.items && <Digest items={sec.items} />}
+          {sec.rungs && <Ladder rungs={sec.rungs} />}
+          {sec.kind === 'map' && <CompanyMap nodes={ind.nodes} />}
+          {sec.kind === 'matrix' && <Matrix nodes={ind.nodes} />}
+          {sec.pairs && <Bottlenecks pairs={sec.pairs} />}
+          {sec.rows && <DataTable rows={sec.rows} />}
+        </section>
+      ))}
 
       <MetricModal metric={metric} onClose={() => setMetric(null)} />
     </>

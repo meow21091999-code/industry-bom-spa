@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { bySlug, companyKey, byCompanyKey, coverage } from '../data.js'
+import Diagram from '../components/Diagram.jsx'
 
 const TAG = { direct: 'tag--direct', indirect: 'tag--indirect', supplier: 'tag--supplier', conglomerate: 'tag--conglomerate' }
 const PRI = { high: 'dot--high', med: 'dot--med', medium: 'dot--med', low: 'dot--low' }
@@ -20,37 +21,6 @@ function MetricModal({ metric, onClose }) {
           Basis: as recorded on the entry page — figures keep their original data label.
         </div>
       </div>
-    </div>
-  )
-}
-
-/* ---------------- system diagram (mermaid) ---------------- */
-function Diagram({ source }) {
-  const ref = useRef(null)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    if (!source) return
-    let cancelled = false
-    const load = new Function('u', 'return import(u)') // keep the CDN URL out of the bundle
-    load('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs')
-      .then(mod => {
-        const mermaid = mod.default || mod
-        mermaid.initialize({ startOnLoad: false, theme: 'base', fontFamily: 'IBM Plex Sans, sans-serif', securityLevel: 'loose' })
-        const id = 'dgm-' + Math.random().toString(36).slice(2)
-        return mermaid.render(id, source).then(({ svg }) => {
-          if (!cancelled && ref.current) ref.current.innerHTML = svg
-        })
-      })
-      .catch(() => { if (!cancelled) setFailed(true) })
-    return () => { cancelled = true }
-  }, [source])
-
-  return (
-    <div className="diagram-shell">
-      {failed
-        ? <pre className="diagram-fallback">{source}</pre>
-        : <div className="mermaid-wrap" ref={ref}><span className="diagram-loading">rendering diagram…</span></div>}
     </div>
   )
 }
@@ -270,7 +240,7 @@ export default function Industry() {
           {sec.kind === 'map' && <CompanyMap nodes={ind.nodes} />}
           {sec.kind === 'matrix' && <Matrix nodes={ind.nodes} />}
           {sec.pairs && <Bottlenecks pairs={sec.pairs} />}
-          {sec.rows && <DataTable rows={sec.rows} />}
+          {sec.tables && sec.tables.map((t, j) => <DataTable key={j} head={t.head} rows={t.rows} />)}
         </section>
       ))}
 

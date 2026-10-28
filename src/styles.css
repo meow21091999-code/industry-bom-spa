@@ -204,3 +204,7 @@ a.row:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(15,37,64,
   .bn { grid-template-columns: 1fr; }
   .rung { grid-template-columns: 1fr; }
 }
+
+/* ---------- diagram ---------- */
+.diagram-scroll { overflow: auto; }
+.diagram-scroll svg { display: block; }

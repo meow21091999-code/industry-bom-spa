@@ -37,12 +37,24 @@ function extractArray(s, startIdx) {
   return null;
 }
 
-const li = block => [...block.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(x => clean(x[1])).filter(Boolean);
+const li = block => block.split(/<li>/).slice(1)
+  .map(seg => clean(seg.split('</li>')[0]))
+  .filter(Boolean);
+
+/** one side of a bottleneck pair: title + body, whichever markup variant */
+function bnSide(raw) {
+  const t = raw.match(/<span class="bn__title">([\s\S]*?)<\/span>/) || raw.match(/<div class="bn__title">([\s\S]*?)<\/div>/);
+  let rest = raw.replace(/<div class="bn__h">[\s\S]*?<\/div>/, '');
+  if (t) rest = rest.replace(t[0], '');
+  return { title: clean(t ? t[1] : ''), text: clean(rest) };
+}
 
 /** parse an entry page into its ordered sections */
 function parseSections(html) {
   const out = [];
-  const parts = html.split(/<section class="animate"/).slice(1);
+  // split on the section head rather than a <section> wrapper: page templates differ
+  const marks = [...html.matchAll(/<div class="sec-head[^"]*"[^>]*>/g)].map(m => m.index);
+  const parts = marks.map((start, i) => html.slice(start, i + 1 < marks.length ? marks[i + 1] : html.length));
   for (const chunk of parts) {
     const tm = chunk.match(/<span class="sec-title">([\s\S]*?)<\/span>/);
     const nm = chunk.match(/<span class="sec-note">([\s\S]*?)<\/span>/);
@@ -59,13 +71,28 @@ function parseSections(html) {
       .map(m => ({ tier: Number(m[1]), label: clean(m[2]), body: clean(m[3]) }));
     if (rungs.length) { sec.kind = sec.kind || 'ladder'; sec.rungs = rungs; }
 
-    const bns = [...chunk.matchAll(/<div class="bn">\s*<div class="bn__risk">\s*<div class="bn__h">[\s\S]*?<\/div>\s*<p>([\s\S]*?)<\/p>\s*<\/div>\s*<div class="bn__opp">\s*<div class="bn__h">[\s\S]*?<\/div>\s*<p>([\s\S]*?)<\/p>/g)]
-      .map(m => ({ risk: splitTitled(m[1]), opp: splitTitled(m[2]) }));
+    const bns = [];
+    for (const bm of chunk.matchAll(/<div class="bn">([\s\S]*?)(?=<div class="bn">|$)/g)) {
+      const body = bm[1];
+      const r = body.match(/<div class="bn__risk">([\s\S]*?)(?=<div class="bn__opp">)/);
+      const o = body.match(/<div class="bn__opp">([\s\S]*)/);
+      if (r && o) bns.push({ risk: bnSide(r[1]), opp: bnSide(o[1]) });
+    }
     if (bns.length) { sec.kind = sec.kind || 'bottlenecks'; sec.pairs = bns; }
 
-    const rows = [...chunk.matchAll(/<tr>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<\/tr>/g)]
-      .map(m => [clean(m[1]), clean(m[2]), clean(m[3]), clean(m[4])]);
-    if (rows.length) { sec.kind = sec.kind || 'table'; sec.rows = rows; }
+    if (!/Matrix/i.test(title)) {
+      const tables = [];
+      for (const tm of chunk.matchAll(/<table[^>]*>([\s\S]*?)<\/table>/g)) {
+        const inner = tm[1];
+        const thead = inner.match(/<thead>([\s\S]*?)<\/thead>/);
+        const head = thead ? [...thead[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(x => clean(x[1])) : [];
+        const rows = [...inner.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+          .map(r => [...r[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(x => clean(x[1])))
+          .filter(r => r.length);
+        if (rows.length) tables.push({ head, rows });
+      }
+      if (tables.length) { sec.kind = sec.kind || 'table'; sec.tables = tables; }
+    }
 
     const ds = chunk.match(/<script type="text\/plain" class="diagram-source">([\s\S]*?)<\/script>/);
     if (ds) { sec.kind = sec.kind || 'diagram'; sec.source = ds[1].trim(); }
